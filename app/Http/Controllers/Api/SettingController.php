@@ -90,7 +90,7 @@ class SettingController extends Controller
         
         // Transform to key-value pair for easier frontend usage
         $formatted = $settings->mapWithKeys(function ($item) {
-            return [$item['key'] => $item['value']];
+            return [$item->key => $item->value];
         });
 
         $settingsHash = md5(

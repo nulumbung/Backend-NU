@@ -1,2 +1,33 @@
+# Backend API Robots Configuration
+# This ensures search engines don't index API endpoints
+
 User-agent: *
-Disallow:
+Allow: /
+Disallow: /api
+Disallow: /admin
+Disallow: /storage
+Disallow: /*.json
+Disallow: /sanctum
+Disallow: /telescope
+
+# Allow legitimate search engine bots
+User-agent: Googlebot
+Allow: /
+Disallow: /api
+Disallow: /sanctum
+
+User-agent: Bingbot
+Allow: /
+Disallow: /api
+
+User-agent: Slurp
+Allow: /
+Disallow: /api
+
+# Crawl delay
+User-agent: *
+Crawl-delay: 1
+
+# Sitemaps
+Sitemap: https://nulumbung.or.id/sitemap.xml
+Sitemap: https://nulumbung.id/sitemap.xml
