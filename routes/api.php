@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\FileUploadController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\NewsletterController;
 use App\Http\Controllers\Api\SettingController;
+use App\Http\Controllers\Api\RoleController;
 
 // Public Routes
 Route::post('/login', [AuthController::class, 'login']);
@@ -49,6 +50,7 @@ Route::get('comments/{type}/{target}', [CommentController::class, 'index']);
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/user', [AuthController::class, 'me']);
+    Route::put('/user/profile', [AuthController::class, 'updateProfile']);
     Route::post('comments/{type}/{target}', [CommentController::class, 'store']);
 });
 
@@ -82,4 +84,8 @@ Route::middleware(['auth:sanctum', 'role:superadmin,admin,editor,redaksi'])->gro
 
 Route::middleware(['auth:sanctum', 'role:superadmin'])->group(function () {
     Route::apiResource('users', UserController::class);
+
+    // Role & Permission Management
+    Route::get('permissions', [RoleController::class, 'permissions']);
+    Route::apiResource('roles', RoleController::class);
 });

@@ -64,4 +64,24 @@ class User extends Authenticatable
     {
         return $this->hasMany(UserLoginDevice::class);
     }
+
+    public function roleModel()
+    {
+        return $this->belongsTo(Role::class, 'role', 'name');
+    }
+
+    public function hasPermission(string $permission): bool
+    {
+        $role = $this->roleModel;
+        if (!$role) {
+            return false;
+        }
+
+        // Superadmin has all permissions
+        if ($this->role === 'superadmin') {
+            return true;
+        }
+
+        return $role->permissions()->where('name', $permission)->exists();
+    }
 }

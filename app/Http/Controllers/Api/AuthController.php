@@ -192,6 +192,39 @@ class AuthController extends Controller
         return response()->json($request->user());
     }
 
+    public function updateProfile(Request $request)
+    {
+        /** @var \App\Models\User $user */
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'name' => 'sometimes|string|max:255',
+            'email' => ['sometimes', 'email', 'max:255', \Illuminate\Validation\Rule::unique('users')->ignore($user->id)],
+            'password' => 'nullable|string|min:8',
+            'current_password' => 'required_with:password|string',
+            'avatar' => 'nullable|string',
+        ]);
+
+        // Verify current password if changing password
+        if (!empty($validated['password'])) {
+            if (!Hash::check($validated['current_password'] ?? '', $user->password)) {
+                return response()->json(['message' => 'Password saat ini tidak sesuai.'], 422);
+            }
+            $validated['password'] = Hash::make($validated['password']);
+        } else {
+            unset($validated['password']);
+        }
+
+        unset($validated['current_password']);
+
+        $user->update($validated);
+
+        return response()->json([
+            'message' => 'Profil berhasil diperbarui.',
+            'user' => $user->fresh(),
+        ]);
+    }
+
     protected function canAccessPortal(User $user, string $portal): bool
     {
         if ($portal === 'admin') {
