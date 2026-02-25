@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\NewsletterController;
 use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\RoleController;
+use App\Http\Controllers\Api\BackupController;
 
 // Public Routes
 Route::post('/login', [AuthController::class, 'login']);
@@ -68,6 +69,8 @@ Route::middleware(['auth:sanctum', 'role:superadmin,admin,editor,redaksi'])->gro
     Route::apiResource('banoms', BanomController::class)->except(['index', 'show']);
     Route::apiResource('multimedia', MultimediaController::class)->except(['index', 'show']); // Index & show are public
     Route::apiResource('histories', HistoryController::class)->except(['index', 'show']);
+    Route::get('agendas/organizers', [AgendaController::class, 'organizers']);
+    Route::get('agendas/export', [AgendaController::class, 'exportData']);
     Route::apiResource('ads', AdvertisementController::class);
     
     Route::apiResource('newsletters', NewsletterController::class)->except(['store']); // Store is handled by public subscribe or explicit admin add
@@ -88,4 +91,9 @@ Route::middleware(['auth:sanctum', 'role:superadmin'])->group(function () {
     // Role & Permission Management
     Route::get('permissions', [RoleController::class, 'permissions']);
     Route::apiResource('roles', RoleController::class);
+
+    // Backup & Restore
+    Route::get('backup/download', [BackupController::class, 'download']);
+    Route::post('backup/restore', [BackupController::class, 'restore']);
+    Route::post('backup/preview', [BackupController::class, 'preview']);
 });

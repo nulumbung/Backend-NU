@@ -182,4 +182,36 @@ class AgendaController extends Controller
         $agenda->delete();
         return response()->json(['message' => 'Agenda deleted successfully']);
     }
+
+    /**
+     * Get unique organizer names for the export filter.
+     */
+    public function organizers()
+    {
+        $organizers = Agenda::select('organizer')
+            ->whereNotNull('organizer')
+            ->where('organizer', '!=', '')
+            ->distinct()
+            ->orderBy('organizer')
+            ->pluck('organizer');
+
+        return response()->json($organizers);
+    }
+
+    /**
+     * Get agenda data filtered by organizer for export.
+     */
+    public function exportData(Request $request)
+    {
+        $request->validate([
+            'organizer' => 'required|string',
+        ]);
+
+        $agendas = Agenda::where('organizer', $request->organizer)
+            ->orderBy('date_start', 'asc')
+            ->get();
+
+        return response()->json($agendas);
+    }
 }
+
