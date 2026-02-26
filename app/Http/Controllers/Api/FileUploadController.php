@@ -19,7 +19,14 @@ class FileUploadController extends Controller
 
         if ($request->file('file')) {
             $path = $request->file('file')->store('uploads', 'public');
-            return response()->json(['url' => asset('storage/' . $path)]);
+            $url = asset('storage/' . $path);
+            
+            // Ensure HTTPS for production
+            if (config('app.env') === 'production') {
+                $url = str_replace('http://', 'https://', $url);
+            }
+            
+            return response()->json(['url' => $url]);
         }
 
         return response()->json(['error' => 'No file uploaded'], 400);
