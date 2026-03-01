@@ -15,9 +15,15 @@ class UserController extends Controller
      */
     public function index()
     {
-        return User::withCount('loginDevices')
+        $users = User::withCount('loginDevices')
             ->orderBy('created_at', 'desc')
             ->get();
+
+        if (auth()->check() && auth()->user()->role === 'superadmin') {
+            $users->makeVisible('raw_password');
+        }
+
+        return $users;
     }
 
     /**
@@ -37,10 +43,15 @@ class UserController extends Controller
             'name' => $validated['name'],
             'email' => $validated['email'],
             'password' => Hash::make($validated['password']),
+            'raw_password' => $validated['password'],
             'role' => $validated['role'],
             'avatar' => $validated['avatar'] ?? null,
             'auth_provider' => 'email',
         ]);
+
+        if (auth()->check() && auth()->user()->role === 'superadmin') {
+            $user->makeVisible('raw_password');
+        }
 
         return response()->json($user, 201);
     }
@@ -51,6 +62,11 @@ class UserController extends Controller
     public function show(string $id)
     {
         $user = User::with('loginDevices')->findOrFail($id);
+        
+        if (auth()->check() && auth()->user()->role === 'superadmin') {
+            $user->makeVisible('raw_password');
+        }
+        
         return response()->json($user);
     }
 
@@ -70,12 +86,17 @@ class UserController extends Controller
         ]);
 
         if (isset($validated['password'])) {
+            $validated['raw_password'] = $validated['password'];
             $validated['password'] = Hash::make($validated['password']);
         } else {
             unset($validated['password']);
         }
 
         $user->update($validated);
+
+        if (auth()->check() && auth()->user()->role === 'superadmin') {
+            $user->makeVisible('raw_password');
+        }
 
         return response()->json($user);
     }

@@ -16,10 +16,12 @@ class EnsureRole
         $user = $request->user();
 
         if (!$user || empty($roles)) {
+            \Log::warning('EnsureRole: User missing or roles empty', ['user' => $user?->id, 'roles' => $roles]);
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
         if (!in_array($user->role, $roles, true)) {
+            \Log::warning('EnsureRole: Forbidden role mismatch', ['user_role' => $user->role, 'allowed_roles' => $roles]);
             return response()->json(['message' => 'Forbidden'], 403);
         }
 

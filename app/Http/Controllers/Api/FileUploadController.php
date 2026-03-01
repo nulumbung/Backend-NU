@@ -21,8 +21,9 @@ class FileUploadController extends Controller
             $path = $request->file('file')->store('uploads', 'public');
             $url = asset('storage/' . $path);
             
-            // Ensure HTTPS for production
-            if (config('app.env') === 'production') {
+            // Ensure HTTPS for production only if actually on HTTPS
+            // asset() respects APP_URL scheme automatically, but if forced proxy:
+            if (config('app.env') === 'production' && str_starts_with(config('app.url'), 'https://')) {
                 $url = str_replace('http://', 'https://', $url);
             }
             

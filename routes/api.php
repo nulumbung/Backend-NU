@@ -23,6 +23,9 @@ use App\Http\Controllers\Api\BackupController;
 // Public Routes
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/register', [AuthController::class, 'register']);
+Route::get('/auth/verify-email/{id}/{hash}', [AuthController::class, 'verifyEmail'])->name('verification.verify');
+Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword']);
+Route::post('/auth/reset-password', [AuthController::class, 'resetPassword']);
 Route::post('/auth/google', [AuthController::class, 'googleLogin']);
 Route::post('/newsletter/subscribe', [NewsletterController::class, 'subscribe']); // Public subscribe
 Route::get('/settings/public', [SettingController::class, 'publicSettings']); // Public settings
@@ -47,12 +50,24 @@ Route::get('histories', [HistoryController::class, 'index']); // Public historie
 Route::get('histories/{history}', [HistoryController::class, 'show']); // Public history detail
 Route::get('comments/{type}/{target}', [CommentController::class, 'index']);
 
+// YouTube Proxy Routes (Legacy/Proxy, we might replace these soon)
+Route::get('youtube/video/{videoId}', [LiveStreamController::class, 'proxyVideoDetails']);
+Route::get('youtube/channel/{channelId}', [LiveStreamController::class, 'proxyChannelDetails']);
+Route::get('youtube/chat/{liveChatId}', [LiveStreamController::class, 'proxyLiveChat']);
+
+// YouTube OAuth Routes
+Route::get('youtube/auth/redirect', [\App\Http\Controllers\Api\YouTubeOAuthController::class, 'redirect']);
+Route::get('youtube/auth/callback', [\App\Http\Controllers\Api\YouTubeOAuthController::class, 'callback']);
+Route::get('youtube/auth/status', [\App\Http\Controllers\Api\YouTubeOAuthController::class, 'status']);
+Route::post('youtube/auth/disconnect', [\App\Http\Controllers\Api\YouTubeOAuthController::class, 'disconnect']);
+
 // Protected Routes
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/user', [AuthController::class, 'me']);
     Route::put('/user/profile', [AuthController::class, 'updateProfile']);
     Route::post('comments/{type}/{target}', [CommentController::class, 'store']);
+
 });
 
 // Admin Panel Protected Routes
@@ -79,6 +94,10 @@ Route::middleware(['auth:sanctum', 'role:superadmin,admin,editor,redaksi'])->gro
     Route::put('settings', [SettingController::class, 'updateBatch']);
 
     Route::post('live-streams/{live_stream}/refresh', [LiveStreamController::class, 'refresh']);
+    Route::get('live-streams/from-channel/{channelId}', [LiveStreamController::class, 'findActiveByChannel']);
+    Route::get('live-streams/my-broadcasts', [LiveStreamController::class, 'myBroadcasts']);
+    
+
     Route::apiResource('live-streams', LiveStreamController::class)->except(['index']);
 
     // File Upload
@@ -93,7 +112,9 @@ Route::middleware(['auth:sanctum', 'role:superadmin'])->group(function () {
     Route::apiResource('roles', RoleController::class);
 
     // Backup & Restore
-    Route::get('backup/download', [BackupController::class, 'download']);
+    Route::get('backup', [BackupController::class, 'index']);
+    Route::post('backup', [BackupController::class, 'store']);
+    Route::get('backup/download/{fileName}', [BackupController::class, 'download']);
+    Route::delete('backup/{fileName}', [BackupController::class, 'destroy']);
     Route::post('backup/restore', [BackupController::class, 'restore']);
-    Route::post('backup/preview', [BackupController::class, 'preview']);
 });

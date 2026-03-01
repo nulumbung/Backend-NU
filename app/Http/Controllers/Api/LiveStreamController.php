@@ -22,12 +22,35 @@ class LiveStreamController extends Controller
     }
 
     /**
+     * Get authenticated user's YouTube live broadcasts.
+     */
+    public function myBroadcasts(): JsonResponse
+    {
+        try {
+            $broadcasts = $this->youTubeService->getMyLiveBroadcasts();
+            return response()->json(['data' => $broadcasts]);
+        } catch (\Exception $e) {
+            Log::error('fetch myBroadcasts error: ' . $e->getMessage());
+            return response()->json(['message' => 'Gagal mengambil daftar siaran YouTube: ' . $e->getMessage()], 401);
+        }
+    }
+
+    /**
      * Display a listing of the resource.
      */
-    public function index(): \Illuminate\Http\Resources\Json\AnonymousResourceCollection
+    public function index(): JsonResponse
     {
-        $streams = LiveStream::orderBy('created_at', 'desc')->paginate(10);
-        return LiveStreamResource::collection($streams);
+        try {
+            $streams = LiveStream::orderBy('created_at', 'desc')->paginate(10);
+            return response()->json(LiveStreamResource::collection($streams)->response()->getData(true));
+        } catch (\Exception $e) {
+            Log::error('LiveStreamController index error: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json([
+                'message' => 'Gagal mengambil daftar siaran: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
@@ -59,30 +82,39 @@ class LiveStreamController extends Controller
      */
     public function store(StoreLiveStreamRequest $request): JsonResponse
     {
-        $validated = $request->validated();
+        try {
+            $validated = $request->validated();
 
-        // Fetch details from YouTube
-        $details = $this->youTubeService->getVideoDetails($validated['youtube_id']);
+            // Fetch details from YouTube
+            $details = $this->youTubeService->getVideoDetails($validated['youtube_id']);
 
-        // Merge details with validated data (validated data takes precedence if provided manually)
-        $data = array_merge($details ?? [], $validated);
+            // Merge details with validated data
+            $data = array_merge($details ?? [], $validated);
 
-        // Ensure we have at least defaults if API failed and user didn't provide overrides
-        if (!$details) {
-             $data['title'] = $data['title'] ?? 'Live Stream ' . $validated['youtube_id'];
-             $data['channel_name'] = $data['channel_name'] ?? 'Unknown Channel';
-             $data['thumbnail_url'] = $data['thumbnail_url'] ?? "https://img.youtube.com/vi/{$validated['youtube_id']}/hqdefault.jpg";
-             $data['status'] = $data['status'] ?? 'upcoming';
+            if (!$details) {
+                Log::warning('YouTube API returned no details for ID: ' . $validated['youtube_id']);
+                $data['title'] = $data['title'] ?? 'Live Stream ' . $validated['youtube_id'];
+                $data['channel_name'] = $data['channel_name'] ?? 'Unknown Channel';
+                $data['thumbnail_url'] = $data['thumbnail_url'] ?? "https://img.youtube.com/vi/{$validated['youtube_id']}/hqdefault.jpg";
+                $data['status'] = $data['status'] ?? 'upcoming';
+            }
+
+            if (!empty($data['is_active']) && $data['is_active']) {
+                LiveStream::where('is_active', true)->update(['is_active' => false]);
+            }
+
+            $stream = LiveStream::create($data);
+
+            return response()->json(new LiveStreamResource($stream), 201);
+        } catch (\Exception $e) {
+            Log::error('LiveStreamController store error: ' . $e->getMessage(), [
+                'youtube_id' => $request->input('youtube_id'),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json([
+                'message' => 'Gagal menyimpan siaran: ' . $e->getMessage()
+            ], 500);
         }
-
-        // Handle is_active logic
-        if (!empty($data['is_active']) && $data['is_active']) {
-            LiveStream::where('is_active', true)->update(['is_active' => false]);
-        }
-
-        $stream = LiveStream::create($data);
-
-        return response()->json(new LiveStreamResource($stream), 201);
     }
 
     /**
@@ -134,5 +166,92 @@ class LiveStreamController extends Controller
         }
 
         return response()->json(['message' => 'Failed to refresh data from YouTube.'], 500);
+    }
+
+    /**
+     * Find an active live stream by Channel ID.
+     */
+    public function findActiveByChannel(string $channelId): JsonResponse
+    {
+        try {
+            // Parse the input in case it's a full URL
+            $channelId = $this->youTubeService->parseIdFromUrl($channelId);
+
+            $details = $this->youTubeService->getLiveVideoFromChannel($channelId);
+            
+            if (!$details) {
+                // Return 200 OK instead of 404, with channel info payload for frontend
+                $channelDetails = $this->youTubeService->getChannelDetails($channelId);
+                
+                return response()->json([
+                    'message' => 'Tidak ada siaran aktif. Channel disimpan untuk dipantau otomatis.',
+                    'youtube_id' => $channelId,
+                    'title' => ($channelDetails ? $channelDetails['title'] : 'Auto Live') . ' (Menunggu Live)',
+                    'channel_name' => $channelDetails ? $channelDetails['title'] : 'Unknown Channel',
+                    'thumbnail_url' => $channelDetails ? ($channelDetails['thumbnails']['high']['url'] ?? null) : null,
+                    'status' => 'upcoming',
+                    'is_channel_fallback' => true
+                ], 200);
+            }
+
+            return response()->json($details);
+        } catch (\Exception $e) {
+            Log::error('LiveStreamController findActiveByChannel error: ' . $e->getMessage());
+            return response()->json(['message' => 'Gagal mencari siaran: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Proxy to get YouTube video details.
+     */
+    public function proxyVideoDetails(string $videoId): JsonResponse
+    {
+        // Parse the input in case it's a full URL
+        $videoId = $this->youTubeService->parseIdFromUrl($videoId);
+
+        // If the ID starts with UC, it's a Channel ID. 
+        // We should search for an active live video in this channel.
+        if (str_starts_with($videoId, 'UC')) {
+            $details = $this->youTubeService->getLiveVideoFromChannel($videoId);
+            if (!$details) {
+                return response()->json([
+                    'message' => 'Tidak ada siaran aktif di channel ini.',
+                    'is_channel' => true,
+                    'channel_id' => $videoId
+                ], 404);
+            }
+            return response()->json($details);
+        }
+
+        $details = $this->youTubeService->getVideoDetails($videoId);
+        if (!$details) {
+            return response()->json(['message' => 'Video tidak ditemukan.'], 404);
+        }
+        return response()->json($details);
+    }
+
+    /**
+     * Proxy to get YouTube channel details.
+     */
+    public function proxyChannelDetails(string $channelId): JsonResponse
+    {
+        $details = $this->youTubeService->getChannelDetails($channelId);
+        if (!$details) {
+            return response()->json(['message' => 'Channel tidak ditemukan.'], 404);
+        }
+        return response()->json($details);
+    }
+
+    /**
+     * Proxy to get YouTube live chat messages.
+     */
+    public function proxyLiveChat(string $liveChatId, Request $request): JsonResponse
+    {
+        $pageToken = $request->query('pageToken');
+        $details = $this->youTubeService->getLiveChatMessages($liveChatId, $pageToken);
+        if (!$details) {
+            return response()->json(['message' => 'Chat tidak ditemukan atau gagal diambil.'], 404);
+        }
+        return response()->json($details);
     }
 }

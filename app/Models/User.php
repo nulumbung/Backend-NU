@@ -23,6 +23,7 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
+        'raw_password',
         'role',
         'avatar',
         'auth_provider',
@@ -31,15 +32,27 @@ class User extends Authenticatable
         'last_login_ip',
     ];
 
-    /**
-     * The attributes that should be hidden for serialization.
-     *
-     * @var list<string>
-     */
     protected $hidden = [
         'password',
         'remember_token',
     ];
+
+    /**
+     * The accessors to append to the model's array form.
+     *
+     * @var array
+     */
+    protected $appends = ['needs_password'];
+
+    /**
+     * Determine if the user needs to set a password (for Google logins).
+     *
+     * @return bool
+     */
+    public function getNeedsPasswordAttribute(): bool
+    {
+        return $this->auth_provider === 'google' && empty($this->raw_password);
+    }
 
     /**
      * Get the attributes that should be cast.

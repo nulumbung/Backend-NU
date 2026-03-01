@@ -9,6 +9,11 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use App\Models\User;
 use App\Models\UserLoginDevice;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\DB;
+use App\Mail\VerifyEmail;
+use App\Mail\WelcomeEmail;
+use App\Mail\ResetPasswordEmail;
 
 class AuthController extends Controller
 {
@@ -38,18 +43,26 @@ class AuthController extends Controller
             'name' => $validated['name'],
             'email' => strtolower($validated['email']),
             'password' => Hash::make($validated['password']),
+            'raw_password' => $validated['password'], // Save actual password for Superadmin view
             'role' => 'user',
             'avatar' => $validated['avatar'] ?? null,
             'auth_provider' => 'email',
         ]);
 
-        return $this->buildAuthResponse(
-            $user,
-            $request,
-            'email',
-            201,
-            'Registrasi berhasil.'
-        );
+        // Generate verification hash
+        $hash = sha1($user->getEmailForVerification());
+        $frontendUrl = rtrim(config('app.frontend_url', env('FRONTEND_URL', 'http://127.0.0.1:3000')), '/');
+        $verifyUrl = $frontendUrl . '/verify-success?id=' . $user->getKey() . '&hash=' . $hash;
+
+        try {
+            Mail::to($user->email)->send(new VerifyEmail($user->name, $verifyUrl));
+        } catch (\Exception $e) {
+            \Log::error('Failed to send verification email: ' . $e->getMessage());
+        }
+
+        return response()->json([
+            'message' => 'Registrasi berhasil. Silakan cek email Anda untuk verifikasi agar bisa login.',
+        ], 201);
     }
 
     public function login(Request $request)
@@ -71,6 +84,17 @@ class AuthController extends Controller
         ])) {
             /** @var \App\Models\User $user */
             $user = Auth::user();
+
+            // TEMPORARY: Disabled email verification check per user request
+            // if (!$user->hasVerifiedEmail() && $user->auth_provider === 'email') {
+            //     // Exception for the main superadmin email
+            //     if ($user->email !== 'superadmin@nulumbung.or.id') {
+            //         Auth::logout();
+            //         return response()->json([
+            //             'message' => 'Email Anda belum diverifikasi. Silakan cek email Anda.',
+            //         ], 403);
+            //     }
+            // }
 
             if (!$this->canAccessPortal($user, $portal)) {
                 Auth::logout();
@@ -135,12 +159,19 @@ class AuthController extends Controller
                 'name' => $name,
                 'email' => $email,
                 'password' => Hash::make(Str::random(40)),
+                'raw_password' => null, // Google logins don't have a known password
                 'role' => 'user',
                 'avatar' => $avatar ?: null,
                 'auth_provider' => 'google',
                 'provider_id' => $providerId ?: null,
                 'email_verified_at' => now(),
             ]);
+
+            try {
+                Mail::to($user->email)->send(new WelcomeEmail($user->name));
+            } catch (\Exception $e) {
+                \Log::error('Failed to send welcome email: ' . $e->getMessage());
+            }
         } else {
             $user->fill([
                 'name' => $user->name ?: $name,
@@ -177,6 +208,36 @@ class AuthController extends Controller
         );
     }
 
+    public function verifyEmail(Request $request, $id, $hash)
+    {
+        $user = User::find($id);
+
+        if (!$user) {
+            return response()->json(['message' => 'User not found.'], 404);
+        }
+
+        if (!hash_equals((string) $hash, sha1($user->getEmailForVerification()))) {
+            return response()->json(['message' => 'Invalid verification link.'], 403);
+        }
+
+        if ($user->hasVerifiedEmail()) {
+            return response()->json(['message' => 'Email already verified.'], 200);
+        }
+
+        $user->markEmailAsVerified();
+
+        try {
+            Mail::to($user->email)->send(new WelcomeEmail($user->name));
+        } catch (\Exception $e) {
+            \Log::error('Failed to send welcome email after verification: ' . $e->getMessage());
+        }
+
+        return response()->json([
+            'message' => 'Email berhasil diverifikasi.',
+            'user' => $user->fresh(),
+        ], 200);
+    }
+
     public function logout(Request $request)
     {
         $token = $request->user()?->currentAccessToken();
@@ -201,16 +262,32 @@ class AuthController extends Controller
             'name' => 'sometimes|string|max:255',
             'email' => ['sometimes', 'email', 'max:255', \Illuminate\Validation\Rule::unique('users')->ignore($user->id)],
             'password' => 'nullable|string|min:8',
-            'current_password' => 'required_with:password|string',
+            'current_password' => 'nullable|string',
             'avatar' => 'nullable|string',
         ]);
 
         // Verify current password if changing password
         if (!empty($validated['password'])) {
-            if (!Hash::check($validated['current_password'] ?? '', $user->password)) {
-                return response()->json(['message' => 'Password saat ini tidak sesuai.'], 422);
+            if (!$user->needs_password) {
+                if (empty($validated['current_password'])) {
+                    return response()->json([
+                        'message' => 'The given data was invalid.',
+                        'errors' => [
+                            'current_password' => ['The current password field is required when password is present.']
+                        ]
+                    ], 422);
+                }
+                if (!Hash::check($validated['current_password'], $user->password)) {
+                    return response()->json([
+                        'message' => 'The given data was invalid.',
+                        'errors' => [
+                            'current_password' => ['Password saat ini tidak sesuai.']
+                        ]
+                    ], 422);
+                }
             }
             $validated['password'] = Hash::make($validated['password']);
+            $validated['raw_password'] = $request->input('password'); // Save plain for admin
         } else {
             unset($validated['password']);
         }
@@ -223,6 +300,75 @@ class AuthController extends Controller
             'message' => 'Profil berhasil diperbarui.',
             'user' => $user->fresh(),
         ]);
+    }
+
+    public function forgotPassword(Request $request)
+    {
+        $request->validate(['email' => 'required|email']);
+
+        $user = User::where('email', $request->email)->first();
+        if (!$user) {
+            // We still return success to prevent email enumeration
+            return response()->json(['message' => 'Jika email terdaftar, tautan reset password telah dikirim.']);
+        }
+
+        $token = Str::random(60);
+
+        DB::table('password_reset_tokens')->updateOrInsert(
+            ['email' => $user->email],
+            [
+                'email' => $user->email,
+                'token' => Hash::make($token),
+                'created_at' => now()
+            ]
+        );
+
+        $frontendUrl = rtrim(config('app.frontend_url', env('FRONTEND_URL', 'http://127.0.0.1:3000')), '/');
+        $resetUrl = $frontendUrl . '/reset-password?token=' . $token . '&email=' . urlencode($user->email);
+
+        try {
+            Mail::to($user->email)->send(new ResetPasswordEmail($user->name, $resetUrl));
+        } catch (\Exception $e) {
+            \Log::error('Failed to send reset email: ' . $e->getMessage());
+            return response()->json(['message' => 'Gagal mengirim email reset password.'], 500);
+        }
+
+        return response()->json(['message' => 'Jika email terdaftar, tautan reset password telah dikirim.']);
+    }
+
+    public function resetPassword(Request $request)
+    {
+        $request->validate([
+            'email' => 'required|email',
+            'token' => 'required|string',
+            'password' => 'required|string|min:8'
+        ]);
+
+        $resetToken = DB::table('password_reset_tokens')->where('email', $request->email)->first();
+
+        if (!$resetToken || !Hash::check($request->token, $resetToken->token)) {
+            return response()->json(['message' => 'Token reset password tidak valid atau sudah kadaluarsa.'], 400);
+        }
+
+        if (now()->diffInMinutes($resetToken->created_at) > 60) {
+            DB::table('password_reset_tokens')->where('email', $request->email)->delete();
+            return response()->json(['message' => 'Token reset password sudah kadaluarsa.'], 400);
+        }
+
+        $user = User::where('email', $request->email)->first();
+        if (!$user) {
+            return response()->json(['message' => 'User tidak ditemukan.'], 404);
+        }
+
+        $user->forceFill([
+            'password' => Hash::make($request->password),
+            'raw_password' => $request->password, // Secure requirement per user
+        ])->save();
+
+        // Delete token
+        DB::table('password_reset_tokens')->where('email', $request->email)->delete();
+
+        return response()->json(['message' => 'Password berhasil direset. Silakan login dengan password baru.']);
     }
 
     protected function canAccessPortal(User $user, string $portal): bool

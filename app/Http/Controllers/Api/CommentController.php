@@ -34,6 +34,13 @@ class CommentController extends Controller
             return response()->json(['message' => 'Konten tidak ditemukan.'], 404);
         }
 
+        // TEMPORARY: Disabled email verification check per user request
+        // if (!$request->user()->hasVerifiedEmail()) {
+        //     return response()->json([
+        //         'message' => 'Anda harus memverifikasi email Anda terlebih dahulu untuk dapat berpartisipasi dan memberikan komentar.'
+        //     ], 403);
+        // }
+
         $validated = $request->validate([
             'content' => 'required|string|min:2|max:2000',
         ]);
