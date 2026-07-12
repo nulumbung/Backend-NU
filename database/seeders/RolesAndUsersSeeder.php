@@ -14,10 +14,10 @@ class RolesAndUsersSeeder extends Seeder
     public function run(): void
     {
         User::updateOrCreate(
-            ['email' => 'superadmin@nulumbung.or.id'],
+            ['email' => 'admin@gmail.com'],
             [
                 'name' => 'Super Admin',
-                'password' => Hash::make('@Pat1muan'),
+                'password' => Hash::make('admin'),
                 'role' => 'superadmin',
                 'avatar' => null,
                 'auth_provider' => 'email',
